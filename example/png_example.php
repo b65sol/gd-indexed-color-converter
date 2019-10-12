@@ -11,20 +11,25 @@
 
 require_once('../src/GDIndexedColorConverter.php');
 
+
+
 // color palette
 $palette = array(
 	array(0, 0, 0),  // black color
-	array(255, 255, 255),  // white color
-	array(255, 0, 0),  // red color
-	array(0, 255, 0),  // green color
-	array(0, 0, 255)  // blue color
+	//array(255, 255, 255),  // white color
+	//array(255, 0, 0),  // red color
+	//array(0, 255, 0),  // green color
+	//array(0, 0, 255),  // blue color
+        array(0, 0, 0, 127), //transparency
+        array(0, 0, 0, 64), //half-black transparency
+		array(255,255,255,127), //white-transparency
 );
 
 // dither amounts
 $dithers = array(0.2, 0.4, 0.8);
 
 // the image file path
-$file_path = 'shell.jpg';
+$file_path = '76457185_p0.png';
 
 // get image information
 $image_info = getimagesize($file_path);
@@ -34,23 +39,24 @@ if (!$image_info) {
 
 $image_type = $image_info[2];
 
-if ($image_type === IMAGETYPE_JPEG || $image_type === IMAGETYPE_JPEG2000) {
+if ($image_type === IMAGETYPE_PNG) {
 	// create image
-	$image = imagecreatefromjpeg($file_path);
+	$image = imagecreatefrompng($file_path);
 } else {
-	exit('The image is not JPEG format');
+	exit('The image is not PNG format');
 }
 
 if ($image) {
 	// indexed color converter
 	$converter = new GDIndexedColorConverter();
+	$pal = $converter->quantize($image, 240, 5);
 
 	// convert the image into indexed color mode
 	foreach($dithers as $dither_amount) {
-		$new_image = $converter->convertToIndexedColor($image, $palette, $dither_amount);
+		$new_image = $converter->convertToIndexedColor($image, $pal, $dither_amount);
 
 		// save the new image
-		imagepng($new_image, 'shell_dither_'.$dither_amount.'.png', 0);
+		imagepng($new_image, 'witch_dither_'.$dither_amount.'.png', 8);
 
 		// free memory of the new image
 		imagedestroy($new_image);

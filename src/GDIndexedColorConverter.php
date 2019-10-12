@@ -11,6 +11,8 @@
  * @license https://github.com/ccpalettes/gd-indexed-color-converter/blob/master/LICENSE
  **/
 
+require_once('GDQuantNode.php');
+
 /**
  * Index Color Mode Converter Class
  *
@@ -40,9 +42,9 @@ class GDIndexedColorConverter
 		$newPalette = array();
 		foreach($palette as $paletteColor) {
 			$newPalette[] = array(
-				'rgb' => $paletteColor,
+				'rgb' => $this->checkAlpha($paletteColor),
 				'lab' => $this->RGBtoLab($paletteColor),
-			); 
+			);
 		}
 
 		$width = imagesx($im);
@@ -51,6 +53,123 @@ class GDIndexedColorConverter
 		$newImage = $this->floydSteinbergDither($im, $width, $height, $newPalette, $dither);
 
 		return $newImage;
+	}
+
+	/**
+	 * Very rudimentary palette selector, consider providing a shrunken copy of your source if it's large.
+	 *
+	 * @param ImageResource $im Image to create the palette.
+	 * @param int $colors Number of target colors.
+	 * @param int $significantbits Number of significant bits. Lower numbers = faster. Default 5
+	 * @return array Array of selected colors.
+	 */
+	public function quantize($im, $colors, $significantbits = 5) {
+		$width = imagesx($im);
+		$height = imagesy($im);
+		$quant = new GDQuantNode($significantbits);
+		for($x = 0; $x < $width; $x++) {
+			for($y = 0; $y < $height; $y++) {
+				$ind = imagecolorat($im, $x, $y);
+				if(($ind >> 24) > 110) {
+					$ind = (127 << 24);
+				}
+				$r = (($ind >> 16) & 0xFF);
+				$g = (($ind >> 8) & 0xFF);
+				$b = ($ind & 0xFF);
+				$a = ($ind >> 24);
+				$quant->add($r, $g, $b, $a);
+			}
+		}
+		$leaves = $quant->findLeaves();
+		if(count($leaves) > $colors) {
+			//Least frequent first.
+			usort($leaves, function($a, $b) {
+				return $a->count - $b->count;
+			});
+			$index = 0;
+			$totalcount = count($leaves);
+			$maxparentage = 8;
+			for($i = 0; $i < $maxparentage; $i++) {
+				foreach($leaves as $ind => $leaf) {
+					if($leaf === null) {
+						continue;
+					}
+					$result = $quant->prune($leaf, $i);
+					if($result == true) {
+						$leaves[$ind] = null;
+						$totalcount -= 1;
+					}
+					if($totalcount <= $colors) {
+						break 2;
+					}
+				}
+				$leaves = array_filter($leaves);
+				usort($leaves, function($a, $b) {
+					return $a->count - $b->count;
+				});
+			}
+		}
+		$leaves = array_filter($leaves);
+		foreach($leaves as $leaf) {
+			$newPalette[] = $leaf->toRGBA();
+		}
+		foreach($newPalette as &$color) {
+			if($color[3] > 110) {
+				$color[3] = 127;
+			}
+			if($color[1] > 248 && $color[1] == $color[2] && $color[2] == $color[3]) {
+				$color[1] = $color[2] = $color[3] = 255;
+			}
+		}
+		return $newPalette;
+	}
+
+	/**
+	 * Clusters a histogram by moving all counts below the median to the closest above the median.
+	 *
+	 * @param array $histogram Histogram to cluster.
+	 * @param array New reduced histogram.
+	 */
+	public function simplifyHistogram($histogram) {
+		$rawcounts = array_values($histogram);
+		sort($rawcounts);
+		$count = count($rawcounts); //total numbers in array
+	    $middleval = floor(($count-1)/2); // find the middle value, or the lowest middle value
+	    if($count % 2) { // odd number, middle is the median
+	        $median = $arr[$middleval];
+	    } else { // even number, calculate avg of 2 medians
+	        $low = $arr[$middleval];
+	        $high = $arr[$middleval+1];
+	        $median = (($low+$high)/2);
+	    }
+		unset($rawcounts);
+		$newhisto = [];
+		foreach($histogram as $index => $counts) {
+			if($counts > $median) {
+				$newhisto[$index] = $counts;
+			}
+		}
+
+		foreach($histogram as $index => $counts) {
+			if($counts <= $media) {
+				$distance = $this->calculateEuclideanDistanceSquare();
+			}
+		}
+	}
+
+
+
+	/**
+	 * Ensure that an alpha value is set for input RGB palette entries.
+	 *
+	 * @param array $color Color array.
+	 * @return array New color array, with alpha channel value if one is not provided.
+	 */
+	public function checkAlpha($color) {
+		if(count($color) == 3) {
+			$color[] = 0;
+		}
+		return $color;
 	}
 
 	/**
@@ -67,7 +186,19 @@ class GDIndexedColorConverter
 	 */
 	private function floydSteinbergDither($im, $width, $height, &$palette, $amount)
 	{
-		$newImage = imagecreatetruecolor($width, $height);
+		$palette_mode = false;
+		if(count($palette) <= 256) {
+			$newImage = imagecreate($width, $height);
+			foreach($palette as $c) {
+				imagecolorallocatealpha($newImage, $c['rgb'][0], $c['rgb'][1], $c['rgb'][2], $c['rgb'][3]);
+			}
+			$palette_mode = true;
+		} else {
+			$newImage = imagecreatetruecolor($width, $height);
+			imagesavealpha($newImage, true);
+			imagealphablending($newImage, false);
+		}
+
 
 		for ($i = 0; $i < $height; $i++) {
 			if ($i === 0) {
@@ -117,7 +248,12 @@ class GDIndexedColorConverter
 					}
 				}
 
-				$newColor = imagecolorallocate($newImage, $closestColor[0], $closestColor[1], $closestColor[2]);
+				if($palette_mode) {
+					$newColor = imagecolorclosestalpha($newImage, $closestColor[0], $closestColor[1], $closestColor[2], $closestColor[3]);
+				} else {
+					$newColor = imagecolorallocatealpha($newImage, $closestColor[0], $closestColor[1], $closestColor[2], $closestColor[3]);
+				}
+
 				imagesetpixel($newImage, $j, $i, $newColor);
 			}
 		}
@@ -164,20 +300,40 @@ class GDIndexedColorConverter
 	 * @return float The square of the euclidean distance of first color and second color
 	 */
 	private function calculateEuclideanDistanceSquare($p, $q) {
-		return pow(($q[0] - $p[0]), 2) + pow(($q[1] - $p[1]), 2) + pow(($q[2] - $p[2]), 2);
+		return max( pow($p[0] - $q[0], 2) , pow(( ($p[0] - $q[0]) - ($p[3] - $q[3]) ), 2) ) +
+		  max( pow($p[1] - $q[1], 2) , pow(( ($p[1] - $q[1]) - ($p[3] - $q[3]) ), 2) ) +
+		  max( pow($p[2] - $q[2], 2) , pow(( ($p[2] - $q[2]) - ($p[3] - $q[3]) ), 2) );
+		//pow(($q[0] - $p[0]), 2) + pow(($q[1] - $p[1]), 2) + pow(($q[2] - $p[2]), 2) + pow(( ($q[3]*6) - ($q[3]*6) ), 2);
 	}
 
+	/*
+	Calculation from: https://stackoverflow.com/questions/4754506/color-similarity-distance-in-rgba-color-space
+	max((r₁-r₂)², (r₁-r₂ - a₁+a₂)²) +
+	max((g₁-g₂)², (g₁-g₂ - a₁+a₂)²) +
+	max((b₁-b₂)², (b₁-b₂ - a₁+a₂)²)
+
+	*/
+
 	/**
-	 * Calculate the RGB color of a pixel.
+	 * Calculate the RGBA color of a pixel.
 	 *
 	 * @param ImageResource $im The image resource
 	 * @param integer $x The x-coordinate of the pixel
 	 * @param integer $y The y-coordinate of the pixel
-	 * @return array An array with red, green and blue values of the pixel
+	 * @return array An array with red, green, blue and alpha values of the pixel
 	 */
 	private function getRGBColorAt($im, $x, $y) {
 		$index = imagecolorat($im, $x, $y);
-		return array(($index >> 16) & 0xFF, ($index >> 8) & 0xFF, $index & 0xFF);
+		$r = ($index >> 16) & 0xFF;
+		$g = ($index >> 8) & 0xFF;
+		$b = ($index & 0xFF);
+		$a = ($index >> 24);
+		//Normalize all (nearly) fully-transparent pixels to black.
+		if($a > 110) {
+			$r = $g = $b = 0;
+			$a = 127;
+		}
+		return array($r, $g, $b, $a);
 	}
 
 	/**
@@ -187,11 +343,11 @@ class GDIndexedColorConverter
 	 * @return array The Lab color
 	 */
 	private function RGBtoLab($rgb) {
-		return $this->XYZtoCIELab($this->RGBtoXYZ($rgb));
+		return $this->XYZtoCIELab($this->RGBtoXYZ($this->checkAlpha($rgb)));
 	}
 
 	/**
-	 * Convert an RGB color to an XYZ space color.
+	 * Convert an RGB color to an XYZ space color, and modified to pass through alpha.
 	 *
 	 * observer = 2°, illuminant = D65
 	 * http://easyrgb.com/index.php?X=MATH&H=02#text2
@@ -204,6 +360,7 @@ class GDIndexedColorConverter
 		$r = $rgb[0] / 255;
 		$g = $rgb[1] / 255;
 		$b = $rgb[2] / 255;
+		$alpha = $rgb[3] / 127;
 
 		if ($r > 0.04045) {
 			$r = pow((($r + 0.055) / 1.055), 2.4);
@@ -230,7 +387,8 @@ class GDIndexedColorConverter
 		return array(
 			$r * 0.4124 + $g * 0.3576 + $b * 0.1805,
 			$r * 0.2126 + $g * 0.7152 + $b * 0.0722,
-			$r * 0.0193 + $g * 0.1192 + $b * 0.9505
+			$r * 0.0193 + $g * 0.1192 + $b * 0.9505,
+			$alpha
 		);
 	}
 
@@ -275,7 +433,7 @@ class GDIndexedColorConverter
 			(116 * $y) - 16,
 			500 * ($x - $y),
 			200 * ($y - $z),
+			$alpha = $xyz[3],
 		);
 	}
 }
-

@@ -9,6 +9,10 @@ To archieve image dithering effect, GDIndexedColorConverter uses [Floyd–Steinb
 (http://en.wikipedia.org/wiki/Floyd%E2%80%93Steinberg_dithering) algorithm to apply error
 diffusion of each pixel onto its neighboring pixels.
 
+This fork adds support for RGBA colors. This is purely experimental, and if you use the quantizer to
+produce a large palette, the dithering phase currently is very slow. PNG-8's produced will allow
+semi-transparent pixels.
+
 Requirements
 ------------
 
@@ -58,6 +62,28 @@ image. This parameter is optional, its default value is 0.75, and the value must
 	imagepng($new_image, 'example_indexed_color.png', 0);
 ```
 
+For the quantizer:
+
+```php
+	// create an image
+	$image = imagecreatefrompng('76457185_p0.png');
+
+	// create a gd indexed color converter
+	$converter = new GDIndexedColorConverter();
+
+	// the color palette
+	$palette = $converter->quantize($image, 128, 5);
+
+	// THIS IS VERY SLOW! Need to speed up closestColor matching.
+	// Perhaps with a quadtree.
+	// convert the image to indexed color mode
+	$new_image = $converter->convertToIndexedColor($image, $palette, 0.2);
+
+	// save the new image
+	imagepng($new_image, 'example_indexed_color_alpha.png', 8);
+```
+
+
 Dithers
 -------
 
@@ -78,3 +104,5 @@ GDIndexedColorConverter is licensed under the [MIT license]
 
 Copyright (c) 2014 [Jeremy Yu](https://github.com/ccpalettes) <ccpalettes@gmail.com>
 
+Some components for this fork written/modified by B6.5 Solutions LLC, also released under the MIT License
+Copyright (c) 2019 [B6.5 Solutions LLC](https://github.com/b65sol) <dev@b65sol.com>
