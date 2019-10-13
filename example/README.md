@@ -6,8 +6,7 @@ indexed-color images with different dither values and five colors(white, black, 
 green and blue).
 
 There is an additional example(`png_example.php`) in the example folder. It calculates a color palette and then
-very slowly uses the same dithering algorithm. (However, it is currently VERY slow with a fair number of colors in the
-palette!)
+uses the same dithering algorithm. It's reasonably quick, so long as the color lookup cache hit rate is decent.
 
 ![Example Output](https://raw.githubusercontent.com/ccpalettes/gd-indexed-color-converter/gh-pages/storage/example_output.jpg)
 

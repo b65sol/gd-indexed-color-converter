@@ -21,6 +21,21 @@ require_once('GDQuantNode.php');
 class GDIndexedColorConverter
 {
 	/**
+	 * A color lookup cache to speed up our naive nearest-neighbor search.
+	 */
+	protected $lookupCache = [];
+
+	/**
+	 * Number of cache lookups.
+	 */
+	protected $cacheLookups = 0;
+
+	/**
+	 * Number of cache hits.
+	 */
+	protected $cacheHits = 0;
+
+	/**
 	 * Constructor.
 	 */
 	public function __construct()
@@ -124,40 +139,6 @@ class GDIndexedColorConverter
 		return $newPalette;
 	}
 
-	/**
-	 * Clusters a histogram by moving all counts below the median to the closest above the median.
-	 *
-	 * @param array $histogram Histogram to cluster.
-	 * @param array New reduced histogram.
-	 */
-	public function simplifyHistogram($histogram) {
-		$rawcounts = array_values($histogram);
-		sort($rawcounts);
-		$count = count($rawcounts); //total numbers in array
-	    $middleval = floor(($count-1)/2); // find the middle value, or the lowest middle value
-	    if($count % 2) { // odd number, middle is the median
-	        $median = $arr[$middleval];
-	    } else { // even number, calculate avg of 2 medians
-	        $low = $arr[$middleval];
-	        $high = $arr[$middleval+1];
-	        $median = (($low+$high)/2);
-	    }
-		unset($rawcounts);
-		$newhisto = [];
-		foreach($histogram as $index => $counts) {
-			if($counts > $median) {
-				$newhisto[$index] = $counts;
-			}
-		}
-
-		foreach($histogram as $index => $counts) {
-			if($counts <= $media) {
-				$distance = $this->calculateEuclideanDistanceSquare();
-			}
-		}
-	}
-
-
 
 	/**
 	 * Ensure that an alpha value is set for input RGB palette entries.
@@ -186,6 +167,7 @@ class GDIndexedColorConverter
 	 */
 	private function floydSteinbergDither($im, $width, $height, &$palette, $amount)
 	{
+		$this->lookupCache = [];
 		$palette_mode = false;
 		if(count($palette) <= 256) {
 			$newImage = imagecreate($width, $height);
@@ -274,8 +256,15 @@ class GDIndexedColorConverter
 		$closestColor;
 		$closestDistance;
 
+		$closestColor = $this->checkColorLookupCache($pixel[$mode]);
+		if($closestColor !== false) {
+			return $closestColor;
+		}
+		unset($closestColor);
+
+		//Naive search, distance metric is assymetic, so I can't build a partitioned space.
 		foreach ($palette as $color) {
-			$distance = $this->calculateEuclideanDistanceSquare($pixel[$mode], $color[$mode]);
+			$distance = $this->calculateAlphaDistance($pixel[$mode], $color[$mode]);
 			if (isset($closestColor)) {
 				if ($distance < $closestDistance) {
 					$closestColor = $color;
@@ -289,7 +278,51 @@ class GDIndexedColorConverter
 			}
 		}
 
+		$this->recordLookupCache($pixel[$mode], $closestColor);
+
 		return $closestColor;
+	}
+
+	/**
+	 * Returns the cache lookup hit rate.
+	 *
+	 * @return float The hitrate as floating point between 0 and 1.
+	 */
+	public function getLookupHitrate() {
+		return $this->cacheHits / $this->cacheLookups;
+	}
+
+	/**
+	 * Checks the color lookup cache for the current pixel.
+	 *
+	 * @param array $pixelCoords The same pixel coordinates passed to calculateAlphaDistance.
+	 * @return mixed Boolean false on no match, palette array on sucess.
+	 */
+	private function checkColorLookupCache($pixelCoords) {
+		$hash = md5(implode('-', array_map('floor', $pixelCoords)));
+		$this->cacheLookups++;
+		if(!empty($this->lookupCache[$hash])) {
+			$this->cacheHits++;
+			return $this->lookupCache[$hash];
+		} else {
+			return false;
+		}
+	}
+
+	/**
+	 * Record an entry for our lookupCache, stores up to 4096 colors.
+	 *
+	 * @param array $pixelCoords The same pixel coordinates passed to calculateAlphaDistance.
+	 * @param array $paletteColor the palette color to store.
+	 */
+	private function recordLookupCache($pixelCoords, $paletteColor) {
+		$hash = md5(implode('-', array_map('floor', $pixelCoords)));
+		if(empty($this->lookupCache[$hash])) {
+			$this->lookupCache[$hash] = $paletteColor;
+			if(count($this->lookupCache) > 4096) {
+				array_shift($this->lookupCache);
+			}
+		}
 	}
 
 	/**
@@ -299,7 +332,7 @@ class GDIndexedColorConverter
 	 * @param array $q The second color
 	 * @return float The square of the euclidean distance of first color and second color
 	 */
-	private function calculateEuclideanDistanceSquare($p, $q) {
+	private function calculateAlphaDistance($p, $q) {
 		return max( pow($p[0] - $q[0], 2) , pow(( ($p[0] - $q[0]) - ($p[3] - $q[3]) ), 2) ) +
 		  max( pow($p[1] - $q[1], 2) , pow(( ($p[1] - $q[1]) - ($p[3] - $q[3]) ), 2) ) +
 		  max( pow($p[2] - $q[2], 2) , pow(( ($p[2] - $q[2]) - ($p[3] - $q[3]) ), 2) );

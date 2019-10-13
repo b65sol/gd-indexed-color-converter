@@ -10,8 +10,10 @@ To archieve image dithering effect, GDIndexedColorConverter uses [Floyd–Steinb
 diffusion of each pixel onto its neighboring pixels.
 
 This fork adds support for RGBA colors. This is purely experimental, and if you use the quantizer to
-produce a large palette, the dithering phase currently is very slow. PNG-8's produced will allow
-semi-transparent pixels.
+produce a large palette, the dithering phase can be very slow, but now has a caching mechanism to make
+things go a little faster. (It's reasonably fast for most cases now.)
+
+PNG-8's produced will allow semi-transparent pixels.
 
 Requirements
 ------------
